@@ -14,7 +14,7 @@
 
         body {
             font-family: system-ui, -apple-system, sans-serif;
-            background: #1a1a1a;
+            background: #161b22;
             height: 100vh;
             overflow: hidden;
             display: flex;
@@ -29,7 +29,7 @@
             width: 100%;
             flex: 1;
             border: none;
-            background: #1a1a1a;
+            background: #161b22;
             height: 100vh;
         }
     </style>
@@ -57,11 +57,11 @@
             return u.startsWith("http") ? u : "https://" + u;
         }
 
-        let isInitialized = false;
+        let hasStarted = false;
 
         async function init() {
-            if (isInitialized) return;
-            isInitialized = true;
+            if (hasStarted) return;
+            hasStarted = true;
 
             try {
                 const urlParams = new URLSearchParams(window.location.search);
@@ -71,12 +71,8 @@
                     return;
                 }
 
-                // サービスワーカーの準備ができるのを確実に待つ
                 await navigator.serviceWorker.ready;
-
-                const serviceworker =
-                    navigator.serviceWorker.controller ??
-                    (await navigator.serviceWorker.ready).active;
+                const serviceworker = navigator.serviceWorker.controller || (await navigator.serviceWorker.ready).active;
 
                 const transport = new EpoxyTransport({
                     wisp: "wss://wisp.mercurywork.shop/"
@@ -92,21 +88,18 @@
 
                 await scramjet.wait();
 
-                const initialUrl = norm(targetUrlParam);
-
                 const frame = scramjet.createFrame(iframe);
-                frame.go(initialUrl);
+                frame.go(norm(targetUrlParam));
 
             } catch (e) {
                 console.error("Init error:", e);
             }
         }
 
-        // 一番最初の動いていた形と同じ、シンプルな登録処理に戻す
         if ("serviceWorker" in navigator) {
-            navigator.serviceWorker.register("/sw.js").then(init);
-        } else {
-            console.error("No service worker support");
+            navigator.serviceWorker.register("/sw.js").then(() => {
+                init();
+            });
         }
     </script>
 </body>
