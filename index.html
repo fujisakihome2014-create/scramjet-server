@@ -21,12 +21,10 @@
             flex-direction: column;
         }
 
-        /* ツールバーは非表示 */
         .toolbar {
             display: none !important;
         }
 
-        /* iframeを画面いっぱいに */
         iframe {
             width: 100%;
             flex: 1;
@@ -59,16 +57,22 @@
             return u.startsWith("http") ? u : "https://" + u;
         }
 
+        let isInitialized = false;
+
         async function init() {
+            if (isInitialized) return;
+            isInitialized = true;
+
             try {
-                // 1. URLのパラメータ (?url=...) をチェック
                 const urlParams = new URLSearchParams(window.location.search);
                 const targetUrlParam = urlParams.get('url');
                 
-                // 2. ?url= がない場合はここで処理をストップ（何もしない）
                 if (!targetUrlParam) {
                     return;
                 }
+
+                // サービスワーカーの準備ができるのを確実に待つ
+                await navigator.serviceWorker.ready;
 
                 const serviceworker =
                     navigator.serviceWorker.controller ??
@@ -90,17 +94,19 @@
 
                 const initialUrl = norm(targetUrlParam);
 
-                // 指定されたURLをiframeで開く
                 const frame = scramjet.createFrame(iframe);
                 frame.go(initialUrl);
 
             } catch (e) {
-                console.error(e);
+                console.error("Init error:", e);
             }
         }
 
+        // 一番最初の動いていた形と同じ、シンプルな登録処理に戻す
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("/sw.js").then(init);
+        } else {
+            console.error("No service worker support");
         }
     </script>
 </body>
