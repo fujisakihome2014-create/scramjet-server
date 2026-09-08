@@ -21,12 +21,12 @@
             flex-direction: column;
         }
 
-        /* ツールバー（UI）は完全に非表示 */
+        /* ツールバーは非表示 */
         .toolbar {
             display: none !important;
         }
 
-        /* iframeを画面いっぱいに広げる */
+        /* iframeを画面いっぱいに */
         iframe {
             width: 100%;
             flex: 1;
@@ -34,21 +34,10 @@
             background: #1a1a1a;
             height: 100vh;
         }
-
-        .error-message {
-            color: #ff6b6b;
-            font-family: sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-            background: #1a1a1a;
-        }
     </style>
 </head>
 
 <body>
-    <!-- UIは非表示 -->
     <div class="toolbar" style="display:none;">
         <input type="text" id="urlInput">
     </div>
@@ -72,13 +61,12 @@
 
         async function init() {
             try {
-                // URLのパラメータ (?url=...) をチェック
+                // 1. URLのパラメータ (?url=...) をチェック
                 const urlParams = new URLSearchParams(window.location.search);
                 const targetUrlParam = urlParams.get('url');
                 
-                // ?url= が指定されていない場合は処理を中断して何も開かない
+                // 2. ?url= がない場合はここで処理をストップ（何もしない）
                 if (!targetUrlParam) {
-                    document.body.innerHTML = '<div class="error-message">URLが指定されていません (?url=...)</div>';
                     return;
                 }
 
