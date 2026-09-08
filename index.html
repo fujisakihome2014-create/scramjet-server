@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
-
+ 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +11,7 @@
             padding: 0;
             box-sizing: border-box;
         }
-
+ 
         body {
             font-family: system-ui, -apple-system, sans-serif;
             background: #161b22;
@@ -20,97 +20,194 @@
             display: flex;
             flex-direction: column;
         }
-
+ 
         .toolbar {
             display: none !important;
         }
-
+ 
         iframe {
             width: 100%;
             flex: 1;
             border: none;
             background: #161b22;
             height: 100vh;
+            /* FIX: hide instantly (no transition) so no white frame is
+               ever visible mid-fade; only fade back IN smoothly. */
+            opacity: 1;
+            transition: opacity 150ms ease;
+        }
+ 
+        iframe.navigating {
+            opacity: 0;
+            transition: none;
+        }
+ 
+        /* FIX: visible feedback instead of a silently blank page on error */
+        #errorBanner {
+            display: none;
+            padding: 12px 16px;
+            background: #3d1f1f;
+            color: #ffb4b4;
+            font-size: 14px;
+            font-family: system-ui, -apple-system, sans-serif;
         }
     </style>
 </head>
-
+ 
 <body>
     <div class="toolbar" style="display:none;">
         <input type="text" id="urlInput">
     </div>
-    
+ 
+    <div id="errorBanner"></div>
     <iframe id="browserFrame" title="Scramjet Browser"></iframe>
-
+ 
     <script src="/scramjet/scramjet.js"></script>
     <script src="/controller/controller.api.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mercuryworkshop/epoxy-transport@3.0.1/dist/index.js"></script>
-
+ 
     <script>
         const { Controller } = $scramjetController;
         const { defaultConfig } = $scramjet;
         const EpoxyTransport = self.EpoxyTransport.default;
-
+ 
         const iframe = document.getElementById("browserFrame");
-
-        function norm(u) {
-            return u.startsWith("http") ? u : "https://" + u;
+        const errorBanner = document.getElementById("errorBanner");
+ 
+        function showError(message) {
+            errorBanner.textContent = message;
+            errorBanner.style.display = "block";
         }
-
-        // 絶対に重複実行させないためのロックフラグ
-        let isInitialized = false;
-
+ 
+        // FIX: validate with the URL constructor instead of a naive
+        // startsWith("http") check, which also matches malformed schemes
+        // like "httpxyz://...".
+        function norm(u) {
+            try {
+                return new URL(u).href;
+            } catch {
+                try {
+                    return new URL("https://" + u).href;
+                } catch {
+                    return null;
+                }
+            }
+        }
+ 
+        let hasStarted = false;
+ 
         async function init() {
-            if (isInitialized) return;
-            isInitialized = true;
-
+            if (hasStarted) return;
+            hasStarted = true;
+ 
             try {
                 const urlParams = new URLSearchParams(window.location.search);
                 const targetUrlParam = urlParams.get('url');
-                
+ 
                 if (!targetUrlParam) {
                     return;
                 }
-
-                await navigator.serviceWorker.ready;
-                const serviceworker = navigator.serviceWorker.controller || (await navigator.serviceWorker.ready).active;
-
+ 
+                const targetUrl = norm(targetUrlParam);
+                if (!targetUrl) {
+                    showError(`Invalid URL: ${targetUrlParam}`);
+                    return;
+                }
+ 
+                // FIX: navigator.serviceWorker.ready was awaited twice
+                // (once here, once inline below). One await is enough.
+                const registration = await navigator.serviceWorker.ready;
+                const serviceworker = navigator.serviceWorker.controller || registration.active;
+ 
                 const transport = new EpoxyTransport({
                     wisp: "wss://wisp.mercurywork.shop/"
                 });
-
+ 
                 await transport.init();
-
+ 
                 const scramjet = new Controller({
                     serviceworker,
                     transport,
                     scramjetConfig: defaultConfig
                 });
-
+ 
                 await scramjet.wait();
-
-                // フレームを一度だけ作成
+ 
                 const frame = scramjet.createFrame(iframe);
-                
-                const finalUrl = norm(targetUrlParam);
-                
-                // 初回のみ移動。以降、iframe自体のイベントで再読み込みが走らないよう監視
-                frame.go(finalUrl);
-
+ 
+                // FIX v2: flicker persisted even with the fade, because a
+                // single click can fire "navigate" and "load" several times
+                // in quick succession (redirects, sub-navigations). Hiding
+                // and showing on every single one of those caused rapid
+                // opacity toggling, which reads as flicker rather than one
+                // clean fade. Now: hiding is instant and any pending "show"
+                // is cancelled, so a burst of navigate/load events collapses
+                // into a single hide -> (settle) -> single show.
+                let showTimer = null;
+                frame.addEventListener("navigate", () => {
+                    clearTimeout(showTimer);
+                    iframe.classList.add("navigating");
+                });
+                iframe.addEventListener("load", () => {
+                    clearTimeout(showTimer);
+                    showTimer = setTimeout(() => {
+                        iframe.classList.remove("navigating");
+                    }, 150);
+                });
+ 
+                // FIX: repeated reload loop on heavy sites (e.g. Wikipedia).
+                // This is usually the shared public wisp server rate-limiting
+                // requests, causing failed fetches that get retried over and
+                // over instead of failing loudly. We can't fix the rate limit
+                // itself here, but we can detect the pattern (many navigate
+                // events to the same URL in a short window) and tell the user
+                // what's happening instead of silently looping forever.
+                let lastNavUrl = null;
+                let navCount = 0;
+                let navWindowStart = 0;
+                frame.addEventListener("navigate", (ev) => {
+                    const now = Date.now();
+                    const url = ev && ev.url;
+                    if (url && url === lastNavUrl && now - navWindowStart < 8000) {
+                        navCount++;
+                    } else {
+                        lastNavUrl = url;
+                        navCount = 1;
+                        navWindowStart = now;
+                    }
+                    if (navCount >= 4) {
+                        showError(
+                            "同じページの読み込みが繰り返されています。公開のwispサーバーが" +
+                            "混雑/レート制限されている可能性が高いです。README記載の通り、" +
+                            "自分のwispサーバー（wisp-server-node等）を立てて config の wisp URL を" +
+                            "差し替えることをおすすめします。"
+                        );
+                        navCount = 0; // avoid spamming the banner every cycle
+                    }
+                });
+ 
+                frame.go(targetUrl);
+ 
             } catch (e) {
+                // FIX: surface errors to the user instead of only logging
+                // to the console, so a failed wisp connection or SW
+                // registration doesn't just look like a blank page.
                 console.error("Init error:", e);
+                showError(`Failed to start: ${e.message || e}`);
             }
         }
-
-        // サービスワーカーの登録と初期化を1回だけに限定
+ 
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("/sw.js").then(() => {
                 init();
-            }).catch(err => {
-                console.error("SW registration error:", err);
+            }).catch((e) => {
+                console.error("SW registration failed:", e);
+                showError(`Service worker registration failed: ${e.message || e}`);
             });
+        } else {
+            showError("This browser does not support Service Workers, which Scramjet requires.");
         }
     </script>
 </body>
-
+ 
 </html>
