@@ -17,94 +17,43 @@
             background: #1a1a1a;
             height: 100vh;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
 
+        /* ツールバー（UI）は完全に非表示 */
         .toolbar {
-            display: flex;
-            gap: 8px;
-            padding: 12px;
-            background: #2d2d2d;
-            border-bottom: 1px solid #3d3d3d;
-            align-items: center;
+            display: none !important;
         }
 
-        .nav-buttons {
-            display: flex;
-            gap: 4px;
-        }
-
-        button {
-            background: #3d3d3d;
-            border: none;
-            color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-
-        button:hover {
-            background: #4d4d4d;
-        }
-
-        button:active {
-            transform: scale(0.95);
-        }
-
-        input {
-            flex: 1;
-            padding: 8px 12px;
-            border-radius: 6px;
-            border: 1px solid #3d3d3d;
-            background: #1a1a1a;
-            color: white;
-            font-size: 14px;
-            outline: none;
-        }
-
-        input:focus {
-            border-color: #0066cc;
-        }
-
-        .status {
-            padding: 4px 12px;
-            background: #3d3d3d;
-            border-radius: 6px;
-            font-size: 12px;
-            color: #aaa;
-        }
-
+        /* iframeを画面いっぱいに広げる */
         iframe {
             width: 100%;
             flex: 1;
             border: none;
-            background: white;
+            background: #1a1a1a;
+            height: 100vh;
         }
 
-        .container {
+        .error-message {
+            color: #ff6b6b;
+            font-family: sans-serif;
             display: flex;
-            flex-direction: column;
+            justify-content: center;
+            align-items: center;
             height: 100vh;
+            background: #1a1a1a;
         }
     </style>
 </head>
 
 <body>
-    <div class="container">
-        <div class="toolbar">
-            <div class="nav-buttons">
-                <button id="backBtn" title="Back">←</button>
-                <button id="forwardBtn" title="Forward">→</button>
-                <button id="reloadBtn" title="Reload">↻</button>
-            </div>
-            <!-- ★readonlyを追加して読み取り専用にしています -->
-            <input type="text" id="urlInput" placeholder="Enter URL..." value="https://example.com" readonly>
-            <button id="goBtn" style="display:none;">Go</button>
-            <div class="status" id="status">Ready</div>
-        </div>
-        <iframe id="browserFrame" title="Scramjet Browser"></iframe>
+    <!-- UIは非表示 -->
+    <div class="toolbar" style="display:none;">
+        <input type="text" id="urlInput">
     </div>
+    
+    <iframe id="browserFrame" title="Scramjet Browser"></iframe>
 
     <script src="/scramjet/scramjet.js"></script>
     <script src="/controller/controller.api.js"></script>
@@ -116,16 +65,6 @@
         const EpoxyTransport = self.EpoxyTransport.default;
 
         const iframe = document.getElementById("browserFrame");
-        const urlInput = document.getElementById("urlInput");
-        const statusEl = document.getElementById("status");
-
-        let scramjet = null;
-        let frame = null;
-
-        function setStatus(t, err = false) {
-            statusEl.textContent = t;
-            statusEl.style.color = err ? "#ff6b6b" : "#aaa";
-        }
 
         function norm(u) {
             return u.startsWith("http") ? u : "https://" + u;
@@ -133,9 +72,15 @@
 
         async function init() {
             try {
-                setStatus("Initializing...");
-
-                await navigator.serviceWorker.ready;
+                // URLのパラメータ (?url=...) をチェック
+                const urlParams = new URLSearchParams(window.location.search);
+                const targetUrlParam = urlParams.get('url');
+                
+                // ?url= が指定されていない場合は処理を中断して何も開かない
+                if (!targetUrlParam) {
+                    document.body.innerHTML = '<div class="error-message">URLが指定されていません (?url=...)</div>';
+                    return;
+                }
 
                 const serviceworker =
                     navigator.serviceWorker.controller ??
@@ -147,7 +92,7 @@
 
                 await transport.init();
 
-                scramjet = new Controller({
+                const scramjet = new Controller({
                     serviceworker,
                     transport,
                     scramjetConfig: defaultConfig
@@ -155,42 +100,19 @@
 
                 await scramjet.wait();
 
-                // ★ URLのパラメータ (?url=...) を取得する処理
-                const urlParams = new URLSearchParams(window.location.search);
-                const targetUrlParam = urlParams.get('url');
-                
-                // パラメータがあればそれを使い、なければデフォルトの https://example.com を使う
-                const initialUrl = targetUrlParam ? norm(targetUrlParam) : "https://example.com";
-                
-                urlInput.value = initialUrl;
+                const initialUrl = norm(targetUrlParam);
 
-                // Bind a frame to the <iframe> and navigate it.
-                frame = scramjet.createFrame(iframe);
+                // 指定されたURLをiframeで開く
+                const frame = scramjet.createFrame(iframe);
                 frame.go(initialUrl);
 
-                setStatus("Ready");
             } catch (e) {
                 console.error(e);
-                setStatus(e.message, true);
             }
         }
 
-        function go() {
-            const url = norm(urlInput.value);
-            urlInput.value = url;
-            frame?.go(url);
-        }
-
-        document.getElementById("goBtn").onclick = go;
-
-        urlInput.addEventListener("keydown", e => {
-            if (e.key === "Enter") go();
-        });
-
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("/sw.js").then(init);
-        } else {
-            setStatus("No service worker support", true);
         }
     </script>
 </body>
