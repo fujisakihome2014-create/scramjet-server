@@ -31,8 +31,6 @@
             border: none;
             background: #161b22;
             height: 100vh;
-            /* FIX: hide instantly (no transition) so no white frame is
-               ever visible mid-fade; only fade back IN smoothly. */
             opacity: 1;
             transition: opacity 150ms ease;
         }
@@ -42,7 +40,6 @@
             transition: none;
         }
 
-        /* FIX: visible feedback instead of a silently blank page on error */
         #errorBanner {
             display: none;
             padding: 12px 16px;
@@ -79,9 +76,6 @@
             errorBanner.style.display = "block";
         }
 
-        // FIX: validate with the URL constructor instead of a naive
-        // startsWith("http") check, which also matches malformed schemes
-        // like "httpxyz://...".
         function norm(u) {
             try {
                 return new URL(u).href;
@@ -114,8 +108,6 @@
                     return;
                 }
 
-                // FIX: navigator.serviceWorker.ready was awaited twice
-                // (once here, once inline below). One await is enough.
                 const registration = await navigator.serviceWorker.ready;
                 const serviceworker = navigator.serviceWorker.controller || registration.active;
 
@@ -135,13 +127,6 @@
 
                 const frame = scramjet.createFrame(iframe);
 
-                // FIX v3: frame.addEventListener does not exist in this
-                // build (Frame only has go/back/forward/reload). Since the
-                // proxied content is served same-origin, we can reach into
-                // iframe.contentWindow directly and hook "beforeunload" to
-                // know when a navigation is starting, instead of relying on
-                // a Scramjet-level "navigate" event that this version
-                // doesn't provide.
                 let showTimer = null;
 
                 function attachUnloadHook() {
@@ -161,8 +146,6 @@
                         iframe.classList.remove("navigating");
                     }, 150);
 
-                    // Re-hook beforeunload on the new document so the
-                    // *next* navigation is caught too.
                     attachUnloadHook();
                 });
 
@@ -171,9 +154,6 @@
                 frame.go(targetUrl);
 
             } catch (e) {
-                // FIX: surface errors to the user instead of only logging
-                // to the console, so a failed wisp connection or SW
-                // registration doesn't just look like a blank page.
                 console.error("Init error:", e);
                 showError(`Failed to start: ${e.message || e}`);
             }
