@@ -93,6 +93,27 @@
             }
         }
 
+        // FIX: the internal /~/sj/{id}/{id}/<encoded-real-url>?$io=...&$rfs=...
+        // form is Scramjet's own routing format, not something a user (or
+        // the Apps Script address bar) should see. Unwrap it back to the
+        // real URL.
+        function unwrapProxyUrl(rawUrl) {
+            try {
+                const marker = "/~/sj/";
+                const idx = rawUrl.indexOf(marker);
+                if (idx === -1) return rawUrl;
+                const rest = rawUrl.slice(idx + marker.length);
+                const parts = rest.split("/");
+                if (parts.length < 3) return rawUrl;
+                let encodedTarget = parts.slice(2).join("/");
+                const qIdx = encodedTarget.indexOf("?");
+                if (qIdx !== -1) encodedTarget = encodedTarget.slice(0, qIdx);
+                return decodeURIComponent(encodedTarget);
+            } catch (e) {
+                return rawUrl;
+            }
+        }
+
         let currentFrame = null;
 
         // FIX: validate with the URL constructor instead of a naive
@@ -189,7 +210,7 @@
                     } catch (e) {
                         // ignore, fall back to targetUrl
                     }
-                    notifyParent({ state: "loaded", url: liveUrl });
+                    notifyParent({ state: "loaded", url: unwrapProxyUrl(liveUrl) });
                 });
 
                 attachUnloadHook();
