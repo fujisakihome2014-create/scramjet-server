@@ -20,4 +20,3 @@ addEventListener("fetch", (e) => {
     e.respondWith($scramjetController.route(e));
   }
 });
- 
