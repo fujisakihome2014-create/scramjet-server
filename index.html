@@ -120,7 +120,7 @@
                 const serviceworker = navigator.serviceWorker.controller || registration.active;
 
                 const transport = new EpoxyTransport({
-                    wisp: "wss://scramjetserver.onrender.com/wisp/"
+                    wisp: "wss://wisp.mercurywork.shop/"
                 });
 
                 await transport.init();
@@ -155,10 +155,6 @@
                     }
                 }
 
-                let lastLoadUrl = null;
-                let loadCount = 0;
-                let loadWindowStart = 0;
-
                 iframe.addEventListener("load", () => {
                     clearTimeout(showTimer);
                     showTimer = setTimeout(() => {
@@ -168,36 +164,6 @@
                     // Re-hook beforeunload on the new document so the
                     // *next* navigation is caught too.
                     attachUnloadHook();
-
-                    // FIX: repeated reload loop on heavy sites (e.g.
-                    // Wikipedia), usually caused by the shared public wisp
-                    // server rate-limiting requests. Detected here via
-                    // repeated loads of the same URL in a short window.
-                    let url = null;
-                    try {
-                        url = iframe.contentWindow.location.href;
-                    } catch (e) {
-                        // can't read it; skip loop detection for this load
-                    }
-                    if (url) {
-                        const now = Date.now();
-                        if (url === lastLoadUrl && now - loadWindowStart < 8000) {
-                            loadCount++;
-                        } else {
-                            lastLoadUrl = url;
-                            loadCount = 1;
-                            loadWindowStart = now;
-                        }
-                        if (loadCount >= 4) {
-                            showError(
-                                "同じページの読み込みが繰り返されています。公開のwispサーバーが" +
-                                "混雑/レート制限されている可能性が高いです。README記載の通り、" +
-                                "自分のwispサーバー（wisp-server-node等）を立てて config の wisp URL を" +
-                                "差し替えることをおすすめします。"
-                            );
-                            loadCount = 0;
-                        }
-                    }
                 });
 
                 attachUnloadHook();
