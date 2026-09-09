@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
- 
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,7 +11,7 @@
             padding: 0;
             box-sizing: border-box;
         }
- 
+
         body {
             font-family: system-ui, -apple-system, sans-serif;
             background: #161b22;
@@ -20,11 +20,11 @@
             display: flex;
             flex-direction: column;
         }
- 
+
         .toolbar {
             display: none !important;
         }
- 
+
         iframe {
             width: 100%;
             flex: 1;
@@ -36,12 +36,12 @@
             opacity: 1;
             transition: opacity 150ms ease;
         }
- 
+
         iframe.navigating {
             opacity: 0;
             transition: none;
         }
- 
+
         /* FIX: visible feedback instead of a silently blank page on error */
         #errorBanner {
             display: none;
@@ -53,32 +53,32 @@
         }
     </style>
 </head>
- 
+
 <body>
     <div class="toolbar" style="display:none;">
         <input type="text" id="urlInput">
     </div>
- 
+
     <div id="errorBanner"></div>
     <iframe id="browserFrame" title="Scramjet Browser"></iframe>
- 
+
     <script src="/scramjet/scramjet.js"></script>
     <script src="/controller/controller.api.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mercuryworkshop/epoxy-transport@3.0.1/dist/index.js"></script>
- 
+
     <script>
         const { Controller } = $scramjetController;
         const { defaultConfig } = $scramjet;
         const EpoxyTransport = self.EpoxyTransport.default;
- 
+
         const iframe = document.getElementById("browserFrame");
         const errorBanner = document.getElementById("errorBanner");
- 
+
         function showError(message) {
             errorBanner.textContent = message;
             errorBanner.style.display = "block";
         }
- 
+
         // FIX: validate with the URL constructor instead of a naive
         // startsWith("http") check, which also matches malformed schemes
         // like "httpxyz://...".
@@ -93,101 +93,117 @@
                 }
             }
         }
- 
+
         let hasStarted = false;
- 
+
         async function init() {
             if (hasStarted) return;
             hasStarted = true;
- 
+
             try {
                 const urlParams = new URLSearchParams(window.location.search);
                 const targetUrlParam = urlParams.get('url');
- 
+
                 if (!targetUrlParam) {
                     return;
                 }
- 
+
                 const targetUrl = norm(targetUrlParam);
                 if (!targetUrl) {
                     showError(`Invalid URL: ${targetUrlParam}`);
                     return;
                 }
- 
+
                 // FIX: navigator.serviceWorker.ready was awaited twice
                 // (once here, once inline below). One await is enough.
                 const registration = await navigator.serviceWorker.ready;
                 const serviceworker = navigator.serviceWorker.controller || registration.active;
- 
+
                 const transport = new EpoxyTransport({
                     wisp: "wss://wisp.mercurywork.shop/"
                 });
- 
+
                 await transport.init();
- 
+
                 const scramjet = new Controller({
                     serviceworker,
                     transport,
                     scramjetConfig: defaultConfig
                 });
- 
+
                 await scramjet.wait();
- 
+
                 const frame = scramjet.createFrame(iframe);
- 
-                // FIX v2: flicker persisted even with the fade, because a
-                // single click can fire "navigate" and "load" several times
-                // in quick succession (redirects, sub-navigations). Hiding
-                // and showing on every single one of those caused rapid
-                // opacity toggling, which reads as flicker rather than one
-                // clean fade. Now: hiding is instant and any pending "show"
-                // is cancelled, so a burst of navigate/load events collapses
-                // into a single hide -> (settle) -> single show.
+
+                // FIX v3: frame.addEventListener does not exist in this
+                // build (Frame only has go/back/forward/reload). Since the
+                // proxied content is served same-origin, we can reach into
+                // iframe.contentWindow directly and hook "beforeunload" to
+                // know when a navigation is starting, instead of relying on
+                // a Scramjet-level "navigate" event that this version
+                // doesn't provide.
                 let showTimer = null;
-                frame.addEventListener("navigate", () => {
-                    clearTimeout(showTimer);
-                    iframe.classList.add("navigating");
-                });
+
+                function attachUnloadHook() {
+                    try {
+                        iframe.contentWindow.addEventListener("beforeunload", () => {
+                            clearTimeout(showTimer);
+                            iframe.classList.add("navigating");
+                        });
+                    } catch (e) {
+                        // cross-origin or not yet available; ignore
+                    }
+                }
+
+                let lastLoadUrl = null;
+                let loadCount = 0;
+                let loadWindowStart = 0;
+
                 iframe.addEventListener("load", () => {
                     clearTimeout(showTimer);
                     showTimer = setTimeout(() => {
                         iframe.classList.remove("navigating");
                     }, 150);
-                });
- 
-                // FIX: repeated reload loop on heavy sites (e.g. Wikipedia).
-                // This is usually the shared public wisp server rate-limiting
-                // requests, causing failed fetches that get retried over and
-                // over instead of failing loudly. We can't fix the rate limit
-                // itself here, but we can detect the pattern (many navigate
-                // events to the same URL in a short window) and tell the user
-                // what's happening instead of silently looping forever.
-                let lastNavUrl = null;
-                let navCount = 0;
-                let navWindowStart = 0;
-                frame.addEventListener("navigate", (ev) => {
-                    const now = Date.now();
-                    const url = ev && ev.url;
-                    if (url && url === lastNavUrl && now - navWindowStart < 8000) {
-                        navCount++;
-                    } else {
-                        lastNavUrl = url;
-                        navCount = 1;
-                        navWindowStart = now;
+
+                    // Re-hook beforeunload on the new document so the
+                    // *next* navigation is caught too.
+                    attachUnloadHook();
+
+                    // FIX: repeated reload loop on heavy sites (e.g.
+                    // Wikipedia), usually caused by the shared public wisp
+                    // server rate-limiting requests. Detected here via
+                    // repeated loads of the same URL in a short window.
+                    let url = null;
+                    try {
+                        url = iframe.contentWindow.location.href;
+                    } catch (e) {
+                        // can't read it; skip loop detection for this load
                     }
-                    if (navCount >= 4) {
-                        showError(
-                            "同じページの読み込みが繰り返されています。公開のwispサーバーが" +
-                            "混雑/レート制限されている可能性が高いです。README記載の通り、" +
-                            "自分のwispサーバー（wisp-server-node等）を立てて config の wisp URL を" +
-                            "差し替えることをおすすめします。"
-                        );
-                        navCount = 0; // avoid spamming the banner every cycle
+                    if (url) {
+                        const now = Date.now();
+                        if (url === lastLoadUrl && now - loadWindowStart < 8000) {
+                            loadCount++;
+                        } else {
+                            lastLoadUrl = url;
+                            loadCount = 1;
+                            loadWindowStart = now;
+                        }
+                        if (loadCount >= 4) {
+                            showError(
+                                "同じページの読み込みが繰り返されています。公開のwispサーバーが" +
+                                "混雑/レート制限されている可能性が高いです。README記載の通り、" +
+                                "自分のwispサーバー（wisp-server-node等）を立てて config の wisp URL を" +
+                                "差し替えることをおすすめします。"
+                            );
+                            loadCount = 0;
+                        }
                     }
                 });
- 
+
+                attachUnloadHook();
+
                 frame.go(targetUrl);
- 
+
             } catch (e) {
                 // FIX: surface errors to the user instead of only logging
                 // to the console, so a failed wisp connection or SW
@@ -196,7 +212,7 @@
                 showError(`Failed to start: ${e.message || e}`);
             }
         }
- 
+
         if ("serviceWorker" in navigator) {
             navigator.serviceWorker.register("/sw.js").then(() => {
                 init();
@@ -209,5 +225,5 @@
         }
     </script>
 </body>
- 
+
 </html>
