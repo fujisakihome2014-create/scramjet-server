@@ -114,6 +114,24 @@
             }
         }
 
+        // FIX: the Apps Script parent UI already has a handler for
+        // {state:'meta', title, favicon} (used to show the tab's real title
+        // and site icon), but nothing on this side ever sent it -- tabs
+        // always just showed the bare hostname. Read it from the proxied
+        // document once it's loaded.
+        function extractMeta(doc, realUrl) {
+            let title = null;
+            let favicon = null;
+            try { title = (doc && doc.title) || null; } catch (e) { /* ignore */ }
+            try {
+                const origin = new URL(realUrl).origin;
+                const iconLink = doc && doc.querySelector('link[rel~="icon"], link[rel="shortcut icon"]');
+                const href = iconLink && iconLink.getAttribute('href');
+                favicon = href ? new URL(href, origin).href : (origin + '/favicon.ico');
+            } catch (e) { /* ignore */ }
+            return { title, favicon };
+        }
+
         let currentFrame = null;
 
         // FIX: validate with the URL constructor instead of a naive
@@ -210,7 +228,17 @@
                     } catch (e) {
                         // ignore, fall back to targetUrl
                     }
-                    notifyParent({ state: "loaded", url: unwrapProxyUrl(liveUrl) });
+                    const realUrl = unwrapProxyUrl(liveUrl);
+                    notifyParent({ state: "loaded", url: realUrl });
+
+                    try {
+                        const meta = extractMeta(iframe.contentDocument, realUrl);
+                        if (meta.title || meta.favicon) {
+                            notifyParent({ state: "meta", title: meta.title, favicon: meta.favicon });
+                        }
+                    } catch (e) {
+                        // cross-origin or otherwise unreadable; skip silently
+                    }
                 });
 
                 attachUnloadHook();
